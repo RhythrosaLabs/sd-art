@@ -5,7 +5,7 @@ replicate
 pydub
 moviepy
 Pillow
-pygame
 pedalboard
 numpy
 trimesh
+requests
