@@ -1,20 +1,14 @@
-# Super-Powered AI Assistant - Enhanced Version
-
 import streamlit as st
 import os
 import json
-import openai
-import replicate
 from pathlib import Path
 from io import BytesIO
 from PIL import Image, ImageFilter
 import moviepy.editor as mp
 from pydub import AudioSegment
+import replicate
 import asyncio
-import threading
-from streamlit_chat import message as st_message  # For chat interface
-import base64
-import tempfile
+import anthropic  # For integrating with Anthropic's Claude model
 
 # -------------------- Configuration --------------------
 
@@ -38,51 +32,34 @@ def init_session_state():
             'openai': '',
             'replicate': '',
             'stability': '',
-            'luma': ''
+            'luma': '',
+            'anthropic': ''
         }
     if 'files' not in st.session_state:
         st.session_state['files'] = []
-    if 'progress' not in st.session_state:
-        st.session_state['progress'] = 0
 
 def save_api_keys():
-    """Save API keys securely."""
+    """Save API keys to a JSON file."""
     try:
-        encoded_keys = secure_api_keys(st.session_state['api_keys'])
         with open('api_keys.json', 'w') as f:
-            json.dump(encoded_keys, f)
-        st.sidebar.success("API keys saved securely!")
+            json.dump(st.session_state['api_keys'], f)
+        st.sidebar.success("API keys saved!")
     except Exception as e:
         st.sidebar.error(f"Error saving API keys: {e}")
 
 def load_api_keys():
-    """Load API keys."""
+    """Load API keys from a JSON file."""
     try:
         with open('api_keys.json', 'r') as f:
-            encoded_keys = json.load(f)
-        st.session_state['api_keys'] = decrypt_api_keys(encoded_keys)
+            st.session_state['api_keys'] = json.load(f)
         st.sidebar.success("API keys loaded!")
     except FileNotFoundError:
         st.sidebar.warning("No saved API keys found.")
     except Exception as e:
         st.sidebar.error(f"Error loading API keys: {e}")
 
-def secure_api_keys(api_keys):
-    """Encrypt API keys using base64 encoding."""
-    encoded_keys = {}
-    for key, value in api_keys.items():
-        encoded_keys[key] = base64.b64encode(value.encode()).decode()
-    return encoded_keys
-
-def decrypt_api_keys(encoded_keys):
-    """Decrypt API keys."""
-    decoded_keys = {}
-    for key, value in encoded_keys.items():
-        decoded_keys[key] = base64.b64decode(value.encode()).decode()
-    return decoded_keys
-
 def save_file(content, file_name, file_type):
-    """Save uploaded file."""
+    """Save uploaded file to the filesystem."""
     try:
         file_path = FILES_DIR / file_name
         with open(file_path, "wb") as f:
@@ -125,18 +102,15 @@ def add_to_conversation(role, content):
 async def nlp_agent(user_input):
     """Process user input and generate assistant's response."""
     add_to_conversation("user", user_input)
-    openai.api_key = st.session_state['api_keys']['openai']
-    if not openai.api_key:
-        return "Please set your OpenAI API key."
+    anthropic_api_key = st.session_state['api_keys']['anthropic']
+    if not anthropic_api_key:
+        return "Please set your Anthropic API key."
 
     try:
-        response = await asyncio.to_thread(openai.ChatCompletion.create,
-            model="gpt-4",
-            messages=st.session_state['conversation'],
-            max_tokens=500,
-            temperature=0.7
-        )
-        assistant_reply = response['choices'][0]['message']['content'].strip()
+        # Use Anthropic's Claude model for advanced understanding
+        client = anthropic.Client(anthropic_api_key)
+        response = await asyncio.to_thread(client.completion, prompt=anthropic.HUMAN_PROMPT + user_input + anthropic.AI_PROMPT)
+        assistant_reply = response['completion'].strip()
         add_to_conversation("assistant", assistant_reply)
         # Process assistant's reply to perform actions
         await process_assistant_reply(assistant_reply)
@@ -147,31 +121,51 @@ async def nlp_agent(user_input):
 
 async def process_assistant_reply(assistant_reply):
     """Process the assistant's reply to perform media actions."""
-    # Here, you can parse the assistant's reply and execute media editing functions accordingly
-    # For example, if the assistant says "I have edited your image as per your request."
-    # You can call the image editing function with the appropriate parameters
-    # This is a placeholder implementation
+    # Parse the assistant's reply to extract actions
+    actions = parse_actions(assistant_reply)
+    for action in actions:
+        if action['type'] == 'edit_image':
+            await perform_image_editing(action)
+        elif action['type'] == 'edit_video':
+            await perform_video_editing(action)
+        elif action['type'] == 'edit_audio':
+            await perform_audio_editing(action)
+        else:
+            st.write("Action not recognized.")
 
-    if "edit image" in assistant_reply.lower():
-        # Extract instructions and perform image editing
-        await perform_image_editing(assistant_reply)
-    elif "edit video" in assistant_reply.lower():
-        await perform_video_editing(assistant_reply)
-    elif "edit audio" in assistant_reply.lower():
-        await perform_audio_editing(assistant_reply)
-    else:
-        # Handle other types of replies or actions
-        pass
+def parse_actions(assistant_reply):
+    """Parse assistant's reply to extract actions."""
+    # Implement a parser that can understand the assistant's reply
+    # For demonstration, we'll assume the assistant provides a JSON-like response
+    # In practice, you might need a more robust NLP parsing method
+    try:
+        actions = json.loads(assistant_reply)
+        return actions
+    except json.JSONDecodeError:
+        st.write("Could not parse assistant's reply.")
+        return []
 
-async def perform_image_editing(instructions):
-    """Perform image editing based on instructions."""
-    # For demonstration purposes, let's assume we apply a filter
-    # In practice, you would parse the instructions to determine the exact actions
+async def perform_image_editing(action):
+    """Perform image editing based on action."""
     image_file = select_file("image")
     if image_file:
         image_path = image_file['path']
         img = Image.open(image_path)
-        img = img.filter(ImageFilter.BLUR)
+
+        # Example: Apply style transfer using Replicate
+        if 'style' in action:
+            replicate_api_token = st.session_state['api_keys']['replicate']
+            if not replicate_api_token:
+                st.warning("Replicate API key is required for style transfer.")
+                return
+            replicate.Client(api_token=replicate_api_token)
+            model = replicate.models.get("laion-ai/erlich")
+            output = model.predict(image=open(image_path, "rb"), style=action['style'])
+            img = Image.open(BytesIO(output))
+
+        # Apply other transformations as per action
+        # ...
+
         edited_image_path = FILES_DIR / f"edited_{Path(image_path).name}"
         img.save(edited_image_path)
         st.success(f"Image edited and saved as {edited_image_path.name}")
@@ -179,15 +173,43 @@ async def perform_image_editing(instructions):
     else:
         st.warning("No image file selected for editing.")
 
-async def perform_video_editing(instructions):
-    """Perform video editing based on instructions."""
-    # Implement video editing logic here
-    pass
+async def perform_video_editing(action):
+    """Perform video editing based on action."""
+    video_file = select_file("video")
+    if video_file:
+        video_path = video_file['path']
+        clip = mp.VideoFileClip(video_path)
 
-async def perform_audio_editing(instructions):
-    """Perform audio editing based on instructions."""
-    # Implement audio editing logic here
-    pass
+        # Example: Apply effects based on action
+        if 'effect' in action:
+            # Apply video effects here
+            pass
+
+        edited_video_path = FILES_DIR / f"edited_{Path(video_path).name}"
+        clip.write_videofile(str(edited_video_path))
+        st.success(f"Video edited and saved as {edited_video_path.name}")
+        st.video(str(edited_video_path))
+    else:
+        st.warning("No video file selected for editing.")
+
+async def perform_audio_editing(action):
+    """Perform audio editing based on action."""
+    audio_file = select_file("audio")
+    if audio_file:
+        audio_path = audio_file['path']
+        audio = AudioSegment.from_file(audio_path)
+
+        # Example: Apply transformations
+        if 'transform' in action:
+            # Apply audio transformations here
+            pass
+
+        edited_audio_path = FILES_DIR / f"edited_{Path(audio_path).name}"
+        audio.export(edited_audio_path, format="mp3")
+        st.success(f"Audio edited and saved as {edited_audio_path.name}")
+        st.audio(str(edited_audio_path))
+    else:
+        st.warning("No audio file selected for editing.")
 
 def select_file(file_type):
     """Select a file of the specified type."""
@@ -205,19 +227,26 @@ def select_file(file_type):
 # -------------------- User Interface --------------------
 
 def main():
-    st.set_page_config(page_title="Super-Powered AI Assistant", layout="wide")
+    st.title("✨ Super-Powered AI Assistant")
+    st.write("Interact with me to create and edit media files using advanced AI capabilities.")
+
     init_session_state()
 
     # Sidebar - API Key Management
     st.sidebar.title("🔑 API Keys")
-    st.sidebar.info("Your API keys are stored securely.")
+    st.sidebar.info("Enter your API keys. They will be saved securely.")
+
     api_keys = st.session_state['api_keys']
     api_keys['openai'] = st.sidebar.text_input("OpenAI API Key", type="password", value=api_keys.get('openai', ''))
     api_keys['replicate'] = st.sidebar.text_input("Replicate API Key", type="password", value=api_keys.get('replicate', ''))
     api_keys['stability'] = st.sidebar.text_input("Stability AI API Key", type="password", value=api_keys.get('stability', ''))
     api_keys['luma'] = st.sidebar.text_input("Luma AI API Key", type="password", value=api_keys.get('luma', ''))
-    st.sidebar.button("Save API Keys", on_click=save_api_keys)
-    st.sidebar.button("Load API Keys", on_click=load_api_keys)
+    api_keys['anthropic'] = st.sidebar.text_input("Anthropic API Key", type="password", value=api_keys.get('anthropic', ''))
+
+    if st.sidebar.button("Save API Keys"):
+        save_api_keys()
+    if st.sidebar.button("Load API Keys"):
+        load_api_keys()
 
     # Sidebar - File Upload
     st.sidebar.title("📁 Upload Files")
@@ -241,29 +270,25 @@ def main():
             save_file(uploaded_file, uploaded_file.name, file_type)
     list_files()
 
-    # Main Interface
-    st.title("✨ Super-Powered AI Assistant")
-    st.write("Interact with me to create and edit media files using advanced AI capabilities.")
-
     # Chat Interface
     st.markdown("### 💬 Chat with the Assistant")
-    chat_container = st.container()
-    with chat_container:
-        for message in st.session_state['conversation']:
-            if message['role'] == 'assistant':
-                st_message(message['content'], is_user=False)
-            else:
-                st_message(message['content'], is_user=True)
-
+    chat_placeholder = st.empty()
     user_input = st.text_input("Type your message...", key="user_input")
+
     if st.button("Send", key="send_button"):
         if user_input.strip() != "":
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             with st.spinner("Processing..."):
                 assistant_reply = loop.run_until_complete(nlp_agent(user_input))
-                st_message(assistant_reply, is_user=False)
                 loop.close()
+            # Display conversation
+            conversation = st.session_state['conversation']
+            for idx, message in enumerate(conversation):
+                if message['role'] == 'user':
+                    st.write(f"**You:** {message['content']}")
+                else:
+                    st.write(f"**Assistant:** {message['content']}")
 
 # -------------------- Run the App --------------------
 
