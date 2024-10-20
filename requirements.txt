@@ -1,6 +1,11 @@
 streamlit
+openai
+anthropic
 replicate
 pydub
 moviepy
 Pillow
-anthropic
+pygame
+pedalboard
+numpy
+trimesh
