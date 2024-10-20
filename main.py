@@ -8,14 +8,13 @@ import moviepy.editor as mp
 from pydub import AudioSegment
 import replicate
 import asyncio
-import anthropic  # For integrating with Anthropic's Claude model
 import openai
-import pygame  # For advanced audio manipulation
 import pedalboard  # For audio effects
 import numpy as np
 import trimesh  # For 3D model handling
 import tempfile
 import base64
+import requests  # Ensure you have requests for handling HTTP requests
 
 # -------------------- Configuration --------------------
 
@@ -26,14 +25,14 @@ SUPPORTED_AUDIO_TYPES = ['mp3', 'wav', 'ogg', 'flac']
 SUPPORTED_DOCUMENT_TYPES = ['txt', 'pdf', 'docx', 'md']
 SUPPORTED_CODE_TYPES = ['py', 'js', 'java', 'cpp', 'c', 'cs', 'rb', 'go', 'php', 'html', 'css']
 SUPPORTED_3D_TYPES = ['obj', 'stl', 'ply', 'glb', 'gltf']
-ALL_SUPPORTED_TYPES = SUPPORTED_IMAGE_TYPES + SUPPORTED_VIDEO_TYPES + SUPPORTED_AUDIO_TYPES + SUPPORTED_DOCUMENT_TYPES + SUPPORTED_CODE_TYPES + SUPPORTED_3D_TYPES
+ALL_SUPPORTED_TYPES = (
+    SUPPORTED_IMAGE_TYPES + SUPPORTED_VIDEO_TYPES + SUPPORTED_AUDIO_TYPES +
+    SUPPORTED_DOCUMENT_TYPES + SUPPORTED_CODE_TYPES + SUPPORTED_3D_TYPES
+)
 
 # Directory for file storage
 FILES_DIR = Path("files")
 FILES_DIR.mkdir(parents=True, exist_ok=True)
-
-# Initialize Pygame mixer for audio
-pygame.mixer.init()
 
 # -------------------- Helper Functions --------------------
 
@@ -273,11 +272,11 @@ def select_file(file_type):
     return None
 
 def display_3d_model(model_path):
-    """Display a 3D model using PyThreeJS or a similar library."""
+    """Display a 3D model using a suitable library."""
     st.write("Displaying 3D model...")
     # Placeholder for 3D model display
     st.write(f"3D model path: {model_path}")
-    # In practice, you would use a library like `pythreejs` or embed a 3D viewer.
+    # You can use libraries like PyVista, vtk, or plotly to render 3D models.
 
 # -------------------- User Interface --------------------
 
@@ -286,8 +285,13 @@ def main():
     init_session_state()
 
     # Custom CSS for styling
-    with open("style.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    # Include your CSS from the HTML file here
+    css_file = "style.css"
+    if os.path.exists(css_file):
+        with open(css_file) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        st.warning("Custom CSS file not found.")
 
     # Sidebar - Navigation
     st.sidebar.title("💡 Super-Powered AI Assistant")
