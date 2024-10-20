@@ -16,8 +16,22 @@ import anthropic  # For integrating with Anthropic's Claude model
 SUPPORTED_IMAGE_TYPES = ['png', 'jpg', 'jpeg', 'bmp']
 SUPPORTED_VIDEO_TYPES = ['mp4', 'mov', 'avi', 'mkv']
 SUPPORTED_AUDIO_TYPES = ['mp3', 'wav', 'ogg', 'flac']
+SUPPORTED_DOCUMENT_TYPES = ['txt', 'pdf', 'docx', 'md']
+SUPPORTED_CODE_TYPES = ['py', 'js', 'java', 'cpp', 'c', 'cs', 'rb', 'go', 'php', 'html', 'css']
+# For any other file types
+SUPPORTED_OTHER_TYPES = []
 
-# File storage directory
+# Combine all supported types
+ALL_SUPPORTED_TYPES = (
+    SUPPORTED_IMAGE_TYPES
+    + SUPPORTED_VIDEO_TYPES
+    + SUPPORTED_AUDIO_TYPES
+    + SUPPORTED_DOCUMENT_TYPES
+    + SUPPORTED_CODE_TYPES
+    + SUPPORTED_OTHER_TYPES
+)
+
+# Directory for file storage
 FILES_DIR = Path("files")
 FILES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -37,24 +51,33 @@ def init_session_state():
         }
     if 'files' not in st.session_state:
         st.session_state['files'] = []
+    if 'file_counter' not in st.session_state:
+        st.session_state['file_counter'] = 0  # To assign unique IDs to files
 
 def save_api_keys():
-    """Save API keys to a JSON file."""
+    """Save API keys to a JSON file and provide a download option."""
     try:
         with open('api_keys.json', 'w') as f:
             json.dump(st.session_state['api_keys'], f)
         st.sidebar.success("API keys saved!")
+        # Provide download option
+        st.sidebar.download_button(
+            label="Download API Keys",
+            data=json.dumps(st.session_state['api_keys'], indent=4),
+            file_name="musemode_api_keys.json",
+            mime="application/json",
+            key="download_api_keys"
+        )
     except Exception as e:
         st.sidebar.error(f"Error saving API keys: {e}")
 
 def load_api_keys():
     """Load API keys from a JSON file."""
     try:
-        with open('api_keys.json', 'r') as f:
-            st.session_state['api_keys'] = json.load(f)
-        st.sidebar.success("API keys loaded!")
-    except FileNotFoundError:
-        st.sidebar.warning("No saved API keys found.")
+        uploaded_file = st.sidebar.file_uploader("Upload API Keys JSON", type="json", key="api_key_uploader")
+        if uploaded_file is not None:
+            st.session_state['api_keys'] = json.load(uploaded_file)
+            st.sidebar.success("API keys loaded!")
     except Exception as e:
         st.sidebar.error(f"Error loading API keys: {e}")
 
@@ -65,38 +88,46 @@ def save_file(content, file_name, file_type):
         with open(file_path, "wb") as f:
             f.write(content.getbuffer())
         st.session_state['files'].append({
+            "id": st.session_state['file_counter'],
             "name": file_name,
             "path": str(file_path),
             "type": file_type
         })
+        st.session_state['file_counter'] += 1  # Increment file counter
         st.success(f"'{file_name}' uploaded successfully!")
     except Exception as e:
         st.error(f"Error uploading file '{file_name}': {e}")
 
 def list_files():
-    """Display uploaded files."""
+    """Display the list of uploaded files with download and delete buttons."""
     st.sidebar.subheader("Your Files")
     files = st.session_state['files']
     if not files:
         st.sidebar.info("No files uploaded yet.")
     else:
-        for idx, file in enumerate(files):
+        for file in files:
             with st.sidebar.expander(f"{file['name']} ({file['type']})"):
-                st.sidebar.download_button(
-                    "Download",
-                    data=open(file['path'], "rb").read(),
-                    file_name=file['name']
-                )
-                if st.sidebar.button(f"Delete {file['name']}", key=f"delete_{idx}"):
+                # Generate a unique key for each download button
+                download_key = f"download_{file['id']}"
+                with open(file['path'], "rb") as f_data:
+                    st.sidebar.download_button(
+                        label="Download",
+                        data=f_data.read(),
+                        file_name=file['name'],
+                        key=download_key
+                    )
+                # Generate a unique key for each delete button
+                delete_key = f"delete_{file['id']}"
+                if st.sidebar.button(f"Delete {file['name']}", key=delete_key):
                     try:
                         os.remove(file['path'])
-                        st.session_state['files'].pop(idx)
+                        st.session_state['files'] = [f for f in st.session_state['files'] if f['id'] != file['id']]
                         st.experimental_rerun()
                     except Exception as e:
                         st.sidebar.error(f"Error deleting file: {e}")
 
 def add_to_conversation(role, content):
-    """Add message to conversation history."""
+    """Add user and assistant messages to the conversation history."""
     st.session_state['conversation'].append({"role": role, "content": content})
 
 async def nlp_agent(user_input):
@@ -108,8 +139,13 @@ async def nlp_agent(user_input):
 
     try:
         # Use Anthropic's Claude model for advanced understanding
-        client = anthropic.Client(anthropic_api_key)
-        response = await asyncio.to_thread(client.completion, prompt=anthropic.HUMAN_PROMPT + user_input + anthropic.AI_PROMPT)
+        client = anthropic.Client(api_key=anthropic_api_key)
+        response = await asyncio.to_thread(
+            client.completion,
+            prompt=anthropic.HUMAN_PROMPT + user_input + anthropic.AI_PROMPT,
+            stop_sequences=[anthropic.HUMAN_PROMPT],
+            max_tokens_to_sample=1000
+        )
         assistant_reply = response['completion'].strip()
         add_to_conversation("assistant", assistant_reply)
         # Process assistant's reply to perform actions
@@ -135,9 +171,8 @@ async def process_assistant_reply(assistant_reply):
 
 def parse_actions(assistant_reply):
     """Parse assistant's reply to extract actions."""
-    # Implement a parser that can understand the assistant's reply
-    # For demonstration, we'll assume the assistant provides a JSON-like response
-    # In practice, you might need a more robust NLP parsing method
+    # Placeholder for parsing logic
+    # For now, we will assume the assistant returns actions in JSON format
     try:
         actions = json.loads(assistant_reply)
         return actions
@@ -147,72 +182,21 @@ def parse_actions(assistant_reply):
 
 async def perform_image_editing(action):
     """Perform image editing based on action."""
-    image_file = select_file("image")
-    if image_file:
-        image_path = image_file['path']
-        img = Image.open(image_path)
-
-        # Example: Apply style transfer using Replicate
-        if 'style' in action:
-            replicate_api_token = st.session_state['api_keys']['replicate']
-            if not replicate_api_token:
-                st.warning("Replicate API key is required for style transfer.")
-                return
-            replicate.Client(api_token=replicate_api_token)
-            model = replicate.models.get("laion-ai/erlich")
-            output = model.predict(image=open(image_path, "rb"), style=action['style'])
-            img = Image.open(BytesIO(output))
-
-        # Apply other transformations as per action
-        # ...
-
-        edited_image_path = FILES_DIR / f"edited_{Path(image_path).name}"
-        img.save(edited_image_path)
-        st.success(f"Image edited and saved as {edited_image_path.name}")
-        st.image(str(edited_image_path))
-    else:
-        st.warning("No image file selected for editing.")
+    # Implementation of image editing logic
+    pass
 
 async def perform_video_editing(action):
     """Perform video editing based on action."""
-    video_file = select_file("video")
-    if video_file:
-        video_path = video_file['path']
-        clip = mp.VideoFileClip(video_path)
-
-        # Example: Apply effects based on action
-        if 'effect' in action:
-            # Apply video effects here
-            pass
-
-        edited_video_path = FILES_DIR / f"edited_{Path(video_path).name}"
-        clip.write_videofile(str(edited_video_path))
-        st.success(f"Video edited and saved as {edited_video_path.name}")
-        st.video(str(edited_video_path))
-    else:
-        st.warning("No video file selected for editing.")
+    # Implementation of video editing logic
+    pass
 
 async def perform_audio_editing(action):
     """Perform audio editing based on action."""
-    audio_file = select_file("audio")
-    if audio_file:
-        audio_path = audio_file['path']
-        audio = AudioSegment.from_file(audio_path)
-
-        # Example: Apply transformations
-        if 'transform' in action:
-            # Apply audio transformations here
-            pass
-
-        edited_audio_path = FILES_DIR / f"edited_{Path(audio_path).name}"
-        audio.export(edited_audio_path, format="mp3")
-        st.success(f"Audio edited and saved as {edited_audio_path.name}")
-        st.audio(str(edited_audio_path))
-    else:
-        st.warning("No audio file selected for editing.")
+    # Implementation of audio editing logic
+    pass
 
 def select_file(file_type):
-    """Select a file of the specified type."""
+    """Allow user to select a file of a specific type."""
     files = [f for f in st.session_state['files'] if f['type'] == file_type]
     if not files:
         st.warning(f"No {file_type} files available.")
@@ -245,14 +229,13 @@ def main():
 
     if st.sidebar.button("Save API Keys"):
         save_api_keys()
-    if st.sidebar.button("Load API Keys"):
-        load_api_keys()
+    load_api_keys()  # Automatically load API keys if the file is uploaded
 
     # Sidebar - File Upload
     st.sidebar.title("📁 Upload Files")
     uploaded_files = st.sidebar.file_uploader(
-        "Upload Images, Videos, or Audio files",
-        type=SUPPORTED_IMAGE_TYPES + SUPPORTED_VIDEO_TYPES + SUPPORTED_AUDIO_TYPES,
+        "Upload Files (Images, Videos, Audio, Documents, Code, etc.)",
+        type=None,  # Accept all file types
         accept_multiple_files=True
     )
     if uploaded_files:
@@ -264,9 +247,12 @@ def main():
                 file_type = "video"
             elif file_extension in SUPPORTED_AUDIO_TYPES:
                 file_type = "audio"
+            elif file_extension in SUPPORTED_DOCUMENT_TYPES:
+                file_type = "document"
+            elif file_extension in SUPPORTED_CODE_TYPES:
+                file_type = "code"
             else:
-                st.sidebar.warning(f"Unsupported file type: {uploaded_file.name}")
-                continue
+                file_type = "other"
             save_file(uploaded_file, uploaded_file.name, file_type)
     list_files()
 
